@@ -8,7 +8,7 @@
 |---|---|
 | 入口 | [`client.mjs`](./client.mjs) |
 | 清单 | [`mod.json`](./mod.json) |
-| 预览图 | `preview.jpg` |
+| 预览图 |[`preview.jpg`](./preview.jpg) |
 
 ---
 
