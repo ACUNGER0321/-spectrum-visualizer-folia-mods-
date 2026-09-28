@@ -8,8 +8,7 @@
 |---|---|
 | 入口 | [`client.mjs`](./client.mjs) |
 | 清单 | [`mod.json`](./mod.json) |
-| 签名说明 | [`SIGNING.md`](./SIGNING.md) |
-| 预览图 | `preview.jpg`（**需自备**，详见 SIGNING.md） |
+| 预览图 | `preview.jpg` |
 
 ---
 
@@ -82,7 +81,7 @@ spectrum-visualizer/
 ├── mod.json          ← Folium 1 清单（name/description 是字符串）
 ├── client.mjs        ← 入口（注册 1 个 stageLayer + 4 个设置项）
 ├── README.md         ← 本文件
-├── preview.jpg       
+├── preview.jpg       ← 预览图
 └── folium.sig.json   ← folium-compound 维护者签名后自动生成
 ```
 
