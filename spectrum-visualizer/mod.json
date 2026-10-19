@@ -4,7 +4,7 @@
   "name": "频谱可视化",
   "version": "0.4.0",
   "author": "ACUNGER.DeepSeek V4",
-  "description": "播放页左下角频谱小组件：段频谱柱+输入功率/峰值频率读数，带自动避让、背景透明，不占歌词区。不额外采集系统音频。",
+  "description": "播放页左下角频谱小组件：48段频谱柱+输入功率/峰值频率读数，带自动避让、背景透明，不占歌词区。不额外采集系统音频。",
   "client": "client.mjs",
   "preview": "preview.jpg",
   "permissions": ["stageLayers"]
