@@ -16,11 +16,12 @@
 // 与 visualizer 的区别：stageLayers 是播放页的叠加图层（歌词之上、控件之下，
 // slot 'player.stage.front'），mount 的 ctx 是 FoliumStageContext，容器默认点击穿透。
 //
-// 声明方式（Folium 1.6）：帧循环、定时器、尺寸变化一律走 ctx 的 onFrame / every /
-// onResize / onChange —— 宿主在 mount 结束时自动停掉它们，不用（也不该）自己养
-// rAF / setInterval。设置值从 settingsSections 句柄的 `handle.settings`（FoliumSettingAccess）
-// 读取，不再用 1.5 及更早的 `handle.params`（Folium 2 起移除）。老宿主缺少 ctx 帧循环时
-// 这里做一次能力探测，退回自建 rAF，保证还能跑。
+// 声明方式（Folium 1.6，Folia >= 0.7.21）：帧循环、定时器一律走 ctx 的 onFrame / every ——
+// 宿主在 mount 结束时自动停掉它们，不用（也不该）自己养 rAF / setInterval。
+// 设置值从 settingsSections 句柄的 `handle.settings`（FoliumSettingAccess）读取，
+// 不再用 1.5 及更早的 `handle.params`（Folium 2 起移除）。
+// mod.json 已声明 `"folia": ">=0.7.21"`，更老的宿主会被宿主自己拦下并提示升级，
+// 所以这里不做版本探测、也不留旧 API 的兜底。
 
 const BARS = 48;
 
@@ -78,44 +79,20 @@ const computeTopBin = (specLen, sampleRate) => {
 const mountStageWidget = (section, container, ctx, logger) => {
   /* 设置值：1.6 的 settingsSections 句柄把 FoliumSettingAccess 放在 `.settings`
      （1.5 及更早叫 `.params`，Folium 2 移除；本版本不再读旧名）。values 在值变化前是同一个对象。 */
-  const values = section && section.settings;
-  if (!values) {
-    /* 老宿主的句柄只有已被弃用的 `.params`：不猜、不去读旧名，宁可这一层不画。 */
-    if (logger && typeof logger.error === 'function') {
-      logger.error('spectrum-visualizer needs Folium 1.6 (settingsSections handle `.settings`).');
-    }
-    return undefined;
-  }
+  const values = section.settings;
   const opts = () => values.get();
 
-  /* ctx.audio 是 Folium 1.2+ 才有的；拿不到就画空闲底座、读数显示 —。 */
-  const audio = ctx && ctx.audio ? ctx.audio : null;
-  const getAudio = () => (ctx && ctx.audio ? ctx.audio : audio);
-
-  /* 1.6 的 mount 上下文自带帧循环与定时器，且随 mount 结束自动停；
-     老宿主没有这两个成员时退回自建 rAF / setInterval。 */
-  const onFrame = (fn) => {
-    if (ctx && typeof ctx.onFrame === 'function') return ctx.onFrame(fn);
-    let id = 0;
-    const loop = (t) => { fn(t); id = requestAnimationFrame(loop); };
-    id = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(id);
-  };
-  const every = (ms, fn) => {
-    if (ctx && typeof ctx.every === 'function') return ctx.every(ms, fn);
-    const id = setInterval(fn, ms);
-    return () => clearInterval(id);
-  };
+  /* ctx.audio：宿主的音频分析器（Folium 1.2+；本模组最低 1.6，恒存在）。 */
+  const getAudio = () => ctx.audio;
 
   /* 走宿主的日志通道（落到 %APPDATA%\Folia\logs）：避让挪位、采样率兜底各记一行，
-     出问题时可以直接看日志，不用猜。 */
+     出问题时可以直接看日志。 */
   const log = (msg) => {
     try { if (logger && typeof logger.info === 'function') logger.info(msg); } catch (_) {}
   };
 
   /* 宿主不给采样率，靠设置项假定；峰值频率与频率轴都从这里取值。
-     填多少用多少，非正值退回 DEFAULT_SR —— 生效值只写一行日志，方便核对
-     （宿主会把 number 型设置项写歪，日志里能看出实际吃进去的是哪个数）。 */
+     填多少用多少，非正值退回 DEFAULT_SR —— 生效值只写一行日志，方便核对。 */
   let lastSr = -1;
   const sampleRate = () => {
     const v = Number(opts().sampleRate);
@@ -173,8 +150,7 @@ const mountStageWidget = (section, container, ctx, logger) => {
   const sg = canvas.getContext('2d');
   const axisEl = shell.querySelector('.sv-axis');
   /* ⚠️ 选择器注意：data-meter 挂在承载数值的 <span> 自己身上（单位 <small> 是兄弟节点），
-     写成 [data-meter="x"] strong 这类带祖先/后代的组合会取到 null
-     （0.1.0 就是在这里崩的），一律用属性选择器直接取。 */
+     写成 [data-meter="x"] strong 这类带祖先/后代的组合会取到 null*/
   const powerEl = shell.querySelector('[data-meter="power"]');
   const peakEl = shell.querySelector('[data-meter="peak"]');
 
@@ -587,12 +563,11 @@ const mountStageWidget = (section, container, ctx, logger) => {
   };
 
   /* ---- 帧循环：音频数值每帧刷新、无事件通知，只能在帧里主动读。
-     Folium 1.6 起交给 ctx.onFrame（宿主自己的帧循环，多模组共享，mount 结束自动停），
-     老宿主退回自建 rAF。 ---- */
-  const stopFrame = onFrame(() => paint());
+     ctx.onFrame 跑在宿主自己的帧循环上（多模组共享），mount 结束自动停。 ---- */
+  const stopFrame = ctx.onFrame(() => paint());
 
   /* ---- 避让轮询（400 ms）：同样走 ctx.every，由宿主在 mount 结束时停掉 ---- */
-  const stopPlaceTimer = every(AVOID.interval, () => autoPlace(performance.now()));
+  const stopPlaceTimer = ctx.every(AVOID.interval, () => autoPlace(performance.now()));
 
   /* ---- 卸载 ---- */
   return () => {
@@ -624,15 +599,8 @@ const meterHtml = (label, unit, key) => `
 
 export default function activate(folium) {
   /* 本模组按 Folium 1.6 的声明方式写：ctx.audio、ctx.onFrame / ctx.every、
-     settingsSections 句柄的 `.settings`（不再是 `.params`）。老宿主只警告、不退出——
-     缺的 ctx 成员在 mountStageWidget 里有兜底，图层照常挂载。 */
-  const host = folium.host && folium.host.folium ? folium.host.folium : { major: 1, minor: 0 };
-  if (host.major < 1 || (host.major === 1 && host.minor < 6)) {
-    folium.log.warn(
-      `spectrum-visualizer targets Folium 1.6; host is ${host.major}.${host.minor}, ` +
-      'falling back to a self-driven frame loop.',
-    );
-  }
+     settingsSections 句柄的 `.settings`（不再是 `.params`）。mod.json 声明了
+     `"folia": ">=0.7.21"`，老宿主在加载前就会被拦下，这里不需要版本探测。 */
 
   /* 设置分区（句柄上的 `.settings` 就是 FoliumSettingAccess） */
   const section = folium.registries.settingsSections.register({

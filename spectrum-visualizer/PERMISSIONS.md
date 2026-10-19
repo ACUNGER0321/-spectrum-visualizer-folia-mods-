@@ -15,6 +15,7 @@
 | 字段 | 本清单声明 | 结论 |
 |---|---|---|
 | `permissions` | `["stageLayers"]` | **需要**，且只需要这一项 |
+| `folia` | `">=0.7.21"` | **需要**：用到只有 Folium 1.6（Folia 0.7.21）才有的接口 |
 | `embedOrigins` | 未声明 | **无** |
 | `experimental` | 未声明 | **无** |
 
@@ -45,17 +46,33 @@ const layerHandle = folium.registries.stageLayers.register({
 
 ### 未声明的权限（本模组不需要，全部写「无」）
 
-宿主对权限是**按需惰性校验**的（`Z = (e, t) => { if (!e.permissions.includes(t)) throw Error('permission-denied:' + t) }`），
+宿主对权限是**按需惰性校验**的（各成员对应哪项权限见
+[`api.md` 权限一览](https://github.com/chthollyphile/folia-major/blob/main/docs/folium/api.md#权限一览)），
 声明用不到的权限只会白扩权限面。以下逐条说明为什么不需要：
 
 | 权限 | 本模组 | 为什么不需要 |
 |---|---|---|
-| `filesystem.data` | 无 | 不读写用户文件、不落盘。宿主侧的 `STORAGE_PERMISSION = 'filesystem.data'` 门控的是模组数据存储；本模组的设置项由宿主 `settingsSections` 托管，自己一个字节都不存 |
-| `playback.read` | 无 | 不接管播放。只**读** `ctx.audio.getPower()` / `getSpectrum()`，不碰播放状态机 |
-| `render.export` | 无 | 不截图、不导出（`api.render.exportVideo` 才需要）。本模组在静态预览下照常渲染，不需要额外能力 |
-| `playback.control` | 无 | 不加播放控制入口。`registries.progressButtons` / 播放菜单项一个都没注册；歌单、播放/暂停全靠宿主自己 |
-| `net.fetch` | 无 | 不联网（宿主的 `NET_FETCH_PERMISSION = 'net.fetch'`）。`client.mjs` 无任何 `fetch` / `XMLHttpRequest`；资源（`client.mjs`、`preview.jpg`）随模组目录经 `folia-mod://` 本地加载 |
-| `net.embed` | 无 | 不嵌 iframe / 远程页面。宿主里 `net.embed` 由 `X()` 门控，还额外要求 `folium.env.context === 'main'`（否则抛 `<api>-unavailable-in-<ctx>`） |
+| `filesystem.data` | 无 | 不读写用户文件、不落盘；设置项由宿主 `settingsSections` 托管，自己一个字节都不存 |
+| `playback.read` | 无 | 只**读** `ctx.audio.getPower()` / `getSpectrum()`，不读播放快照 |
+| `render.export` | 无 | 不调用 `api.render.exportVideo`，不导出视频；静态预览下照常渲染，不需要额外能力 |
+| `playback.control` | 无 | 不调用 `folium.playback.*`，也没注册进度条按钮；歌单、播放/暂停全靠宿主自己 |
+| `net.fetch` | 无 | 不调用 `folium.net.fetch`；`client.mjs` 无任何 `fetch` / `XMLHttpRequest`，资源（`client.mjs`、`preview.jpg`）随模组目录经 `folia-mod://` 本地加载 |
+| `net.embed` | 无 | 不调用 `folium.ui.embed`，不嵌 iframe / 远程页面 |
+
+---
+
+## `folia`
+
+### `">=0.7.21"` —— 需要
+
+本模组的清单与入口都按 **Folium 1.6** 写，最低对应 **Folia 0.7.21**：
+
+- 权限名 `stageLayers`（更老的校验器只认 `ui.stage`）；
+- `ctx.onFrame` / `ctx.every`（1.6 起每个 mount 上下文都有）；
+- `settingsSections` 句柄的 `.settings`（更早的宿主只有旧名 `.params`）。
+
+不声明范围时，0.7.20 会在加载阶段就报看不懂的清单/权限错误；写上 `folia` 后，
+宿主会直接提示需要更新版本，而不是让模组半加载失败。
 
 ---
 

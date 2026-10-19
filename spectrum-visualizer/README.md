@@ -126,7 +126,11 @@ client activate: permission-denied:stageLayers
 "仍可用的旧名字"，Folium 2 直接移除。）
 注意 `visualizers` 不需要这个权限，别照抄 `visualizer52hz/mod.json` 的"无 permissions"写法。
 
-逐条说明（每个权限为什么需要/为什么不需要，以及 `embedOrigins`、`experimental` 为何为空）
+清单同时声明 `"folia": ">=0.7.21"`：本模组用到的 `ctx.onFrame` / `ctx.every` 与句柄 `.settings`
+都是 **Folium 1.6** 才有的接口，更老的 Folia（如 0.7.20）现在会在加载阶段直接提示需要更新，
+而不会半加载失败。
+
+逐条说明（每个权限为什么需要/为什么不需要，以及 `folia`、`embedOrigins`、`experimental`）
 见 [`PERMISSIONS.md`](./PERMISSIONS.md)。
 
 对照官方示例 `visualizer52hz/mod.json`（本仓库 `mods/visualizer52hz/` 里就有）：
@@ -191,8 +195,9 @@ spectrum-visualizer/
 Folium 2 会移除 1.x 的旧名字，并在清单出现未知字段时直接拒绝加载。本模组 0.4.0 已按
 [Folium 1.6 契约](https://github.com/chthollyphile/folia-major/blob/main/docs/folium/api.md) 改写：
 
-| 项 | 旧写法（1.5 及更早） | 现在（1.6） |
+| 项 | 旧写法（1.5 及更早） | 现在（1.6，Folia >= 0.7.21） |
 |---|---|---|
+| 清单最低宿主 | 无 `folia` 字段 | `"folia": ">=0.7.21"` |
 | 权限 | `ui.stage` | `stageLayers` |
 | 设置值 | 句柄上的 `settings.params.get()` | 句柄上的 `settings.settings.get()`（`FoliumSettingAccess`） |
 | 帧循环 | 自建 `requestAnimationFrame` | `ctx.onFrame(fn)`（宿主帧循环，mount 结束自动停） |
@@ -200,8 +205,9 @@ Folium 2 会移除 1.x 的旧名字，并在清单出现未知字段时直接拒
 | 卸载 | `activate` 返回 `{ dispose }` | `activate` 直接返回函数 |
 
 另外确认清单只写了契约认识的字段（`folium` / `id` / `name` / `version` / `author` /
-`description` / `client` / `preview` / `permissions`），没有 2.0 会报错的未知键；也没有用到
-`folium.internals`、`folium.events.on` 的非事件名、main 入口的 `api.experimental` 等 2.0 移除项。
+`description` / `client` / `preview` / `folia` / `permissions`），没有 2.0 会报错的未知键；
+也没有用到 `folium.internals`、`folium.events.on` 的非事件名、main 入口的 `api.experimental`
+等 2.0 移除项。
 
 ---
 
@@ -216,4 +222,4 @@ Folium 2 会移除 1.x 的旧名字，并在清单出现未知字段时直接拒
 | `0.3.1` | 修正假定采样率：48 kHz → 44.1 kHz（依据 Folia 自身按 21.5 Hz/格划频段），解析度 23.4 → 21.5 Hz，并新增「假定采样率」设置项；默认底边距 120 → 20 px 压到最底、避让步长 12 → 16 px |
 | `0.3.2` | 修复避让"躲太远"：步长误写成 `组件高度 + step`（116 px）→ 改为纯 `step`（16 px），并加 `maxLift` 200 px 上限；遮挡判定新增 `paints()`，透明布局壳不再算遮挡；采样率假定改用 boolean 开关（number 型被宿主写成 75000 → 36.6 Hz）；挪位与解析度推算写 `folium.log.info` 便于诊断 |
 | `0.3.3` | **删掉「解析度」读数**（效果差且宿主无接口可取，只留功率 + 峰值）；「假定采样率」改回 number 输入框，填多少用多少（非正值退回 44100，生效值写日志）；新增「背景透明」开关 |
-| `0.4.0` | 升级到 Folium 1.6 声明方式并为 2.0 做准备：权限 `ui.stage` → `stageLayers`；设置改读句柄的 `.settings`（不再用 `.params`）；帧循环与 400 ms 避让轮询改走 `ctx.onFrame` / `ctx.every`（宿主托管、自动停；老宿主仍退回自建 rAF）；`activate` 返回值维持函数式 disposer；清单补齐 1.6 字段、去掉所有 2.0 会报错的未知项 |
+| `0.4.0` | 升级到 Folium 1.6 声明方式并为 2.0 做准备：清单声明 `"folia": ">=0.7.21"`（0.7.20 及更早明确提示需更新，不再半加载失败）；权限 `ui.stage` → `stageLayers`；设置改读句柄的 `.settings`（不再用 `.params`）；帧循环与 400 ms 避让轮询改走 `ctx.onFrame` / `ctx.every`，并删掉旧宿主的 rAF / `setInterval` 兜底与版本探测；`activate` 返回值维持函数式 disposer；清单只保留 1.6 认识的字段 |
