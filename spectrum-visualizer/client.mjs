@@ -1,6 +1,6 @@
 // mods/spectrum-visualizer/client.mjs
 //
-// Folium 1.2+ 播放页图层模组（stageLayer）。
+// Folium 1.6 播放页图层模组（stageLayer）。
 // 把原 spectrum-viewer 项目（viewer.js + viewer.css）的频谱显示逻辑做成
 // Folia 播放页上的一个独立小组件：左下角（被挡时自动避让）的紧凑频谱卡，不占歌词区。
 //
@@ -11,15 +11,16 @@
 //     依据是 Folia 自己拿 Math.floor(freq / 21.5) 索引频谱数组划分频段，21.5 Hz/格）
 //   · 自动避让：命中测试宿主元素，撞上"下一首预告"等遮挡时自动换位
 //   · 可选背景透明：去掉卡片底色 / 毛玻璃 / 描边，只留频谱柱与读数
-//   · 音频走 ctx.audio（getPower / getSpectrum，Folium 1.2+）
+//   · 音频走 ctx.audio（getPower / getSpectrum）
 //
 // 与 visualizer 的区别：stageLayers 是播放页的叠加图层（歌词之上、控件之下，
-// slot 'player.stage.front'），mount 只收 container（ctx 可能有也可能没有），
-// 容器默认点击穿透 —— 纯显示组件正好。
+// slot 'player.stage.front'），mount 的 ctx 是 FoliumStageContext，容器默认点击穿透。
 //
-// 渲染驱动：官方文档明确"音频数值每帧刷新、无事件通知，需在帧循环里主动读取"，
-// 所以这里用 requestAnimationFrame 自驱循环（visualizer 用歌钟是因为它要跟歌词；
-// 频谱是连续信号，rAF 更自然，也顺带兼容 mount 不给 ctx 的情况）。
+// 声明方式（Folium 1.6）：帧循环、定时器、尺寸变化一律走 ctx 的 onFrame / every /
+// onResize / onChange —— 宿主在 mount 结束时自动停掉它们，不用（也不该）自己养
+// rAF / setInterval。设置值从 settingsSections 句柄的 `handle.settings`（FoliumSettingAccess）
+// 读取，不再用 1.5 及更早的 `handle.params`（Folium 2 起移除）。老宿主缺少 ctx 帧循环时
+// 这里做一次能力探测，退回自建 rAF，保证还能跑。
 
 const BARS = 48;
 
@@ -74,11 +75,37 @@ const computeTopBin = (specLen, sampleRate) => {
    播放页小组件 mount
    ============================================================ */
 
-const mountStageWidget = (settings, container, ctx, logger) => {
-  /* ctx / audio 都是可选的（sample-rickroll 的 mount 只收 container），
-     全部做防御式访问：拿不到就画空闲底座、读数显示 n/a。 */
+const mountStageWidget = (section, container, ctx, logger) => {
+  /* 设置值：1.6 的 settingsSections 句柄把 FoliumSettingAccess 放在 `.settings`
+     （1.5 及更早叫 `.params`，Folium 2 移除；本版本不再读旧名）。values 在值变化前是同一个对象。 */
+  const values = section && section.settings;
+  if (!values) {
+    /* 老宿主的句柄只有已被弃用的 `.params`：不猜、不去读旧名，宁可这一层不画。 */
+    if (logger && typeof logger.error === 'function') {
+      logger.error('spectrum-visualizer needs Folium 1.6 (settingsSections handle `.settings`).');
+    }
+    return undefined;
+  }
+  const opts = () => values.get();
+
+  /* ctx.audio 是 Folium 1.2+ 才有的；拿不到就画空闲底座、读数显示 —。 */
   const audio = ctx && ctx.audio ? ctx.audio : null;
   const getAudio = () => (ctx && ctx.audio ? ctx.audio : audio);
+
+  /* 1.6 的 mount 上下文自带帧循环与定时器，且随 mount 结束自动停；
+     老宿主没有这两个成员时退回自建 rAF / setInterval。 */
+  const onFrame = (fn) => {
+    if (ctx && typeof ctx.onFrame === 'function') return ctx.onFrame(fn);
+    let id = 0;
+    const loop = (t) => { fn(t); id = requestAnimationFrame(loop); };
+    id = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(id);
+  };
+  const every = (ms, fn) => {
+    if (ctx && typeof ctx.every === 'function') return ctx.every(ms, fn);
+    const id = setInterval(fn, ms);
+    return () => clearInterval(id);
+  };
 
   /* 走宿主的日志通道（落到 %APPDATA%\Folia\logs）：避让挪位、采样率兜底各记一行，
      出问题时可以直接看日志，不用猜。 */
@@ -91,7 +118,7 @@ const mountStageWidget = (settings, container, ctx, logger) => {
      （宿主会把 number 型设置项写歪，日志里能看出实际吃进去的是哪个数）。 */
   let lastSr = -1;
   const sampleRate = () => {
-    const v = Number(settings.params.get().sampleRate);
+    const v = Number(opts().sampleRate);
     const sr = v > 0 ? v : DEFAULT_SR;
     if (sr !== lastSr) {
       lastSr = sr;
@@ -156,7 +183,7 @@ const mountStageWidget = (settings, container, ctx, logger) => {
   /* ---- 外观：背景透明开关（每帧读一次设置，值变了才写样式） ---- */
   let transparentSkin = null;
   const applySkin = () => {
-    const on = settings.params.get().transparentBg === true;
+    const on = opts().transparentBg === true;
     if (on === transparentSkin) return;
     transparentSkin = on;
     shell.style.background = on ? 'transparent' : 'rgba(8,12,9,.42)';
@@ -334,7 +361,6 @@ const mountStageWidget = (settings, container, ctx, logger) => {
   let blocked = 0;         // 连续被遮挡的轮数
   let cleanSince = 0;      // 当前位置连续干净的起点
   let cooldownUntil = 0;
-  let lastPlace = 0;
   let revealed = false;
   let legacyFix = false;
 
@@ -347,7 +373,7 @@ const mountStageWidget = (settings, container, ctx, logger) => {
 
   const autoPlace = (now) => {
     /* 关掉自动避让 → 退回 0.2.x 的固定左下位。 */
-    if (settings.params.get().autoAvoid === false) {
+    if (opts().autoAvoid === false) {
       if (!legacyFix) {
         legacyFix = true;
         curDx = 0; curDy = 0; curIndex = -1;
@@ -537,7 +563,7 @@ const mountStageWidget = (settings, container, ctx, logger) => {
     if (spectrum && (spectrum.length !== axisSpecLen || sampleRate() !== axisSr)) buildAxis();
 
     const hasSignal = !!spectrum;
-    const idleBase = settings.params.get().showIdleBase !== false;
+    const idleBase = opts().showIdleBase !== false;
     const bw = w / BARS;
     const specLen = spectrum ? spectrum.length : 1024;
     const top = computeTopBin(specLen, sampleRate());
@@ -560,19 +586,18 @@ const mountStageWidget = (settings, container, ctx, logger) => {
     readMeters(performance.now());
   };
 
-  /* ---- rAF 自驱循环（音频数据每帧刷新、无事件通知） ---- */
-  let raf = 0;
-  const loop = () => {
-    paint();
-    const now = performance.now();
-    if (now - lastPlace >= AVOID.interval) { lastPlace = now; autoPlace(now); }
-    raf = requestAnimationFrame(loop);
-  };
-  raf = requestAnimationFrame(loop);
+  /* ---- 帧循环：音频数值每帧刷新、无事件通知，只能在帧里主动读。
+     Folium 1.6 起交给 ctx.onFrame（宿主自己的帧循环，多模组共享，mount 结束自动停），
+     老宿主退回自建 rAF。 ---- */
+  const stopFrame = onFrame(() => paint());
+
+  /* ---- 避让轮询（400 ms）：同样走 ctx.every，由宿主在 mount 结束时停掉 ---- */
+  const stopPlaceTimer = every(AVOID.interval, () => autoPlace(performance.now()));
 
   /* ---- 卸载 ---- */
   return () => {
-    cancelAnimationFrame(raf);
+    stopFrame();
+    stopPlaceTimer();
     clearTimeout(revealTimer);
     try { ro.disconnect(); } catch (_) {}
     try { co && co.disconnect(); } catch (_) {}
@@ -598,17 +623,19 @@ const meterHtml = (label, unit, key) => `
    ============================================================ */
 
 export default function activate(folium) {
-  /* 能力探测：ctx.audio 是 Folium 1.2 才补的。老宿主只 warn、不退出——
-     图层照常挂载（画空闲底座），audio 调用处有运行时探测。 */
-  const minor = folium.host?.folium?.minor ?? 0;
-  if (minor < 2) {
+  /* 本模组按 Folium 1.6 的声明方式写：ctx.audio、ctx.onFrame / ctx.every、
+     settingsSections 句柄的 `.settings`（不再是 `.params`）。老宿主只警告、不退出——
+     缺的 ctx 成员在 mountStageWidget 里有兜底，图层照常挂载。 */
+  const host = folium.host && folium.host.folium ? folium.host.folium : { major: 1, minor: 0 };
+  if (host.major < 1 || (host.major === 1 && host.minor < 6)) {
     folium.log.warn(
-      'spectrum-visualizer needs Folium 1.2+ for ctx.audio; the widget will idle on this host.',
+      `spectrum-visualizer targets Folium 1.6; host is ${host.major}.${host.minor}, ` +
+      'falling back to a self-driven frame loop.',
     );
   }
 
-  /* 设置分区 */
-  const settings = folium.registries.settingsSections.register({
+  /* 设置分区（句柄上的 `.settings` 就是 FoliumSettingAccess） */
+  const section = folium.registries.settingsSections.register({
     id: 'spectrum-visualizer',
     label: { 'zh-CN': '频谱可视化', en: 'Spectrum visualizer' },
     description: {
@@ -663,17 +690,16 @@ export default function activate(folium) {
   });
 
   /* 注册播放页图层：歌词之上、播放器控件之下。
-     mount 可能只收到 container（sample-rickroll 就只用了 container），
-     ctx 的获取在 mountStageWidget 里做防御式处理。 */
+     需要 mod.json 里的 `stageLayers` 权限（1.5 及更早叫 `ui.stage`，Folium 2 移除）。 */
   const layerHandle = folium.registries.stageLayers.register({
     id: 'spectrum-widget',
     slot: 'player.stage.front',
-    mount: (container, ctx) => mountStageWidget(settings, container, ctx, folium.log),
+    mount: (container, ctx) => mountStageWidget(section, container, ctx, folium.log),
   });
 
-  /* 卸载 */
+  /* 卸载：返回函数即 1.6 / 2.0 的规范写法（不再用 { dispose }）。 */
   return () => {
     try { layerHandle.unregister(); } catch (_) {}
-    try { settings.unregister(); } catch (_) {}
+    try { section.unregister(); } catch (_) {}
   };
 }
