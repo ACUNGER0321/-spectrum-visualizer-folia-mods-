@@ -104,6 +104,25 @@ spectrum-visualizer/
 
 ---
 
+## Folium 1.6 声明方式 / 2.0 兼容
+
+Folium 2 会移除 1.x 的旧名字，并在清单出现未知字段时直接拒绝加载。本模组 0.4.0 已按
+[Folium 1.6 契约](https://github.com/chthollyphile/folia-major/blob/main/docs/folium/api.md) 改写：
+
+| 项 | 旧写法（1.5 及更早） | 现在（1.6） |
+|---|---|---|
+| 权限 | `ui.stage` | `stageLayers` |
+| 设置值 | 句柄上的 `settings.params.get()` | 句柄上的 `settings.settings.get()`（`FoliumSettingAccess`） |
+| 帧循环 | 自建 `requestAnimationFrame` | `ctx.onFrame(fn)`（宿主帧循环，mount 结束自动停） |
+| 定时器 | 自建 `setInterval` | `ctx.every(ms, fn)` |
+| 卸载 | `activate` 返回 `{ dispose }` | `activate` 直接返回函数 |
+
+另外确认清单只写了契约认识的字段（`folium` / `id` / `name` / `version` / `author` /
+`description` / `client` / `preview` / `permissions`），没有 2.0 会报错的未知键；也没有用到
+`folium.internals`、`folium.events.on` 的非事件名、main 入口的 `api.experimental` 等 2.0 移除项。
+
+---
+
 ## 版本记录
 
 | 版本 | 改动 |
@@ -115,3 +134,4 @@ spectrum-visualizer/
 | `0.3.1` | 新增「假定采样率」设置项；默认底边距 120 → 20 px 压到最底、避让步长 12 → 16 px |
 | `0.3.2` | 修复避让：并加 `maxLift` 200 px 上限；遮挡判定新增 `paints()`，透明布局壳不再算遮挡 |
 | `0.3.3` | **删掉「解析度」读数**（效果差且宿主无接口可取）；新增「背景透明」开关 |
+| `0.4.0` | 升级到 Folium 1.6 声明方式并为 2.0 做准备：权限 `ui.stage` → `stageLayers`；设置改读句柄的 `.settings`（不再用 `.params`）；帧循环与 400 ms 避让轮询改走 `ctx.onFrame` / `ctx.every`（宿主托管、自动停；老宿主仍退回自建 rAF）；`activate` 返回值维持函数式 disposer；清单补齐 1.6 字段、去掉所有 2.0 会报错的未知项 |
